@@ -1,0 +1,10 @@
+treamlit==1.39.0
+pandas==2.3.3
+openpyxl==3.1.5
+python-dotenv==1.0.1
+numpy==1.26.4
+SQLAlchemy==2.0.44
+secure-smtplib==0.1.1
+pyarrow==21.0.0
+mysql-connector-python==9.5.0
+pymysql==1.1.2
