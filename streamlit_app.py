@@ -376,7 +376,100 @@ def compute_row_hash(row):
 # ===============================
 st.set_page_config(page_title="Rejection Report Automation", page_icon="📊", layout="wide")
 st.title("📊 Rejection Report Automation System")
-st.caption("Only sheets processed: **Rejection DIP-1** and **Rejection DIP-2**")
+st.caption("sheets processed: **Rejection DIP-1** , **Rejection DIP-2**, **Prod-Rej**" )
+
+
+
+# ------------------------------
+# CUSTOM CSS FOR BEAUTIFUL UI
+# ------------------------------
+# ------------------------------
+# ULTRA MODERN CUSTOM CSS
+# ------------------------------
+st.markdown("""
+<style>
+
+    /* Background gradient */
+    .stApp {
+        background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+        font-family: 'Segoe UI', sans-serif;
+    }
+
+    /* Floating animation */
+    @keyframes float {
+        0%   { transform: translateY(0px); }
+        50%  { transform: translateY(-8px); }
+        100% { transform: translateY(0px); }
+    }
+
+    /* Glassmorphic Login Card */
+    .glass-card {
+        width: 520px;
+        margin: 80px auto;
+        padding: 40px;
+        background: rgba(255,255,255,0.08);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-radius: 20px;
+        border: 1px solid rgba(255,255,255,0.15);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+        animation: float 4s ease-in-out infinite;
+    }
+
+    /* Title */
+    .title {
+        text-align: center;
+        font-size: 48px;
+        font-weight: 900;
+        background: -webkit-linear-gradient(#ffffff, #d1d1d1);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 10px;
+    }
+
+    /* Subtitle */
+    .subtitle {
+        text-align: center;
+        font-size: 18px;
+        color: #c9c9c9;
+        margin-top: -10px;
+        margin-bottom: 40px;
+    }
+
+    /* Input field style */
+    .stTextInput > div > div > input {
+        background: rgba(255,255,255,0.18);
+        border: 1px solid rgba(255,255,255,0.25);
+        border-radius: 12px;
+        padding: 14px;
+        font-size: 16px;
+        color: white;
+    }
+
+    /* Button style */
+    .stButton > button {
+        width: 100%;
+        height: 52px;
+        font-size: 20px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #6a11cb, #2575fc);
+        border: none;
+        color: white;
+        font-weight: 600;
+        transition: 0.3s;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+
+    .stButton > button:hover {
+        background: linear-gradient(135deg, #8e2de2, #4a00e0);
+        transform: translateY(-3px);
+        box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+    }
+
+</style>
+""", unsafe_allow_html=True)
+
+
 
 # ===============================
 # EMAIL / OTP
@@ -601,7 +694,7 @@ def save_excel_file(uploaded_file, user_email):
 def process_prod_rej_sheet(df, sheet_name):
 
     df = normalize_headers(df)
-    st.write("RAW Prod-Rej Columns:", list(df.columns))
+    
     # Required columns check
     missing = [c for c in PROD_REJ_REQUIRED_COLUMNS if c not in df.columns]
     if missing:
@@ -1221,7 +1314,7 @@ def login_view():
     else:
         st.info(f"OTP sent to: {st.session_state.email}")
         otp_input = st.text_input("Enter OTP", max_chars=6)
-        col1, col2 = st.columns(2)
+        col1, col2 = st.columns([0.5,0.5], gap="small")
         with col1:
             if st.button("Verify OTP"):
                 if verify_otp(st.session_state.email, otp_input):
@@ -1243,7 +1336,7 @@ def login_view():
 
 def upload_tab():
     st.header("📁 Upload Rejection Report")
-    st.caption("Accepted sheets: **Rejection DIP-1** and **Rejection DIP-2**")
+    st.caption("Accepted sheets: **Prod-Rej**, **Rejection DIP-1** and **Rejection DIP-2**")
     uploaded_file = st.file_uploader(
         "Choose Excel file",
         type=['xlsx', 'xls'],
@@ -1397,7 +1490,7 @@ def mc_browser_tab():
         key=lambda x: x["table"].lower()
     )
     st.subheader("Available MC Tables")
-    st.dataframe(pd.DataFrame(items), use_container_width=True, height=240)
+    st.dataframe(pd.DataFrame(items), width="stretch", height=240)
 
     names = [x["table"] for x in items]
     selected = st.selectbox("Select MC Table", names)
@@ -1421,7 +1514,7 @@ def mc_browser_tab():
                 df = pd.DataFrame(rows)
 
             st.caption(f"Total rows: {total} • Showing: {len(df)} • Offset: {offset}")
-            st.dataframe(df, use_container_width=True)
+            st.dataframe(df, width="stretch")
 
             # Export current page
             c1, c2 = st.columns(2)
@@ -1452,7 +1545,7 @@ def prod_rej_data_tab():
         engine, params={"u": st.session_state.email}
     )
 
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(df, width="stretch")
 
 # ===============================
 # MAIN
