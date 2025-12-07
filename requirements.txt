@@ -8,3 +8,4 @@ secure-smtplib==0.1.1
 pyarrow==21.0.0
 mysql-connector-python==9.5.0
 pymysql==1.1.2
+cryptography==46.0.3

@@ -616,16 +616,13 @@ def coerce_text_df(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def calculate_file_hash(df: pd.DataFrame) -> str:
-    """Stable content hash regardless of row/column order and data types."""
     df_norm = normalize_headers(df.copy())
-    df_norm = ensure_columns(df_norm, REQUIRED_COLUMNS, fill="")
+
+    df_norm = ensure_columns(df_norm, ALL_HASH_COLUMNS, fill="")
     df_norm = coerce_text_df(df_norm)
 
-    keep = [c for c in REQUIRED_COLUMNS if c in df_norm.columns]
-    if keep:
-        df_norm = df_norm[keep].sort_values(by=keep).reset_index(drop=True)
-    else:
-        df_norm = pd.DataFrame(columns=REQUIRED_COLUMNS)
+    keep = [c for c in ALL_HASH_COLUMNS if c in df_norm.columns]
+    df_norm = df_norm[keep].sort_values(by=keep).reset_index(drop=True)
 
     payload = pd.util.hash_pandas_object(df_norm, index=False).values.tobytes()
     return hashlib.md5(payload).hexdigest()
@@ -703,7 +700,7 @@ def process_prod_rej_sheet(df, sheet_name):
 
     # Clean DATE
     df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce").dt.date
-
+    df["M/C#"] = pd.to_numeric(df["M/C#"], errors="coerce")
     df = df[df["M/C#"].notna()]
     df["M/C#"] = df["M/C#"].astype(int)
 
@@ -828,104 +825,137 @@ def clean_value(v):
 def store_prod_rej_rows(df, user_email, fname, version):
     session = get_session()
     try:
-        # Convert NaN → None (first pass)
-        df = df.where(pd.notnull(df), None)
+        import numpy as np
+        
+        # FIX: Convert all numpy.nan to None for MySQL
+        df = df.replace({np.nan: None})
 
-        # Generate row hash
-        df["row_hash"] = df.apply(
-            lambda r: hashlib.md5(
-                f"{r.get('DATE')}|{r.get('M/C#')}|{r.get('SHIFT')}|{r.get('Total Rej NOs')}".encode()
-            ).hexdigest(),
-            axis=1
-        )
-
-        existing = set(
-            h[0]
-            for h in session.query(ProdRejData.row_hash)
-                .filter(ProdRejData.row_hash.in_(df["row_hash"].tolist()))
-        )
-
-        new_rows = []
-
-        def to_int(v):
-            if v is None:
-                return None
-            try:
-                if isinstance(v, float) and pd.isna(v):
-                    return None
-                return int(v)
-            except:
-                return None
-
-        def to_float(v):
-            if v is None:
-                return None
-            try:
-                if isinstance(v, float) and pd.isna(v):
-                    return None
-                return float(v)
-            except:
-                return None
-
-        def clean(v):
-            if v is None:
-                return None
-            if isinstance(v, float) and pd.isna(v):
-                return None
-            return v
-
-        for _, r in df.iterrows():
-
-            if r["row_hash"] in existing:
-                continue
-
-            new_rows.append(
-                ProdRejData(
-                    user_email=user_email,
-
-                    plant=clean(r.get("PLANT")),
-                    date_field=r.get("DATE"),
-                    shift=clean(r.get("SHIFT")),
-                    mc_number=to_int(r.get("M/C#")),
-                    dn_class=clean(r.get("DN/CLASS")),
-                    length=to_float(r.get("LENGTH")),
-
-                    cast_nos=to_int(r.get("CAST NOs")),
-                    casting_rej_nos=to_int(r.get("Casting Rej NOs")),
-                    casting_rej_percent=to_float(r.get("Casting Rej%")),
-
-                    conv_nos=to_int(r.get("CONV NOs")),
-                    hptm_testing=to_int(r.get("HPTM Testing")),
-                    hptm_rej_nos=to_int(r.get("HPTM Rej NOs")),
-                    hptm_rej_percent=to_float(r.get("HPTM Rej%")),
-
-                    annealing_rej_nos=to_int(r.get("Annealing Rej NOs")),
-                    online_rej_nos=to_int(r.get("Online Rej NOs")),
-                    final_rej_nos=to_int(r.get("Final Rej NOs")),
-                    rework_rej_nos=to_int(r.get("Rework Rej NOs")),
-                    yard_rej_nos=to_int(r.get("Yard Rej NOs")),
-                    sr_rej_nos=to_int(r.get("S/R Rej NOs")),
-
-                    other_rej_nos=to_int(r.get("Other Rej NOs")),
-                    other_rej_percent=to_float(r.get("Other Rej%")),
-
-                    total_rej_nos=to_int(r.get("Total Rej NOs")),
-                    total_rej_percent=to_float(r.get("Total Rej%")),
-
-                    sl_cut_loss_mt=to_float(r.get("S/L Cut Loss MT")),
-
-                    source_sheet=clean(r.get("source_sheet")),
-                    original_filename=fname,
-                    file_version=version,
-                    row_hash=r["row_hash"]
-                )
+        # === STEP 1: Compute identity key per row ===
+        def identity_key(r):
+            return (
+                str(r.get("PLANT")).strip(),
+                r.get("DATE"),
+                str(r.get("SHIFT")).strip(),
+                int(r.get("M/C#")) if r.get("M/C#") not in (None, "", "nan") else None,
+                str(r.get("DN/CLASS")).strip(),
+                float(r.get("LENGTH")) if r.get("LENGTH") not in (None, "", "nan") else None
             )
 
-        if new_rows:
-            session.add_all(new_rows)
-            session.commit()
+        # === STEP 2: Preload all existing rows for this user ===
+        existing_rows = session.query(ProdRejData).filter(
+            ProdRejData.user_email == user_email
+        ).all()
 
-        return len(new_rows)
+        existing_map = {}
+        for row in existing_rows:
+            key = (
+                row.plant,
+                row.date_field,
+                row.shift,
+                row.mc_number,
+                row.dn_class,
+                row.length
+            )
+            existing_map[key] = row
+
+        inserted = 0
+        updated = 0
+
+        # === STEP 3: Process incoming Excel rows ===
+        for _, r in df.iterrows():
+
+            key = identity_key(r)
+
+            # Convert for DB
+            plant = str(r.get("PLANT")).strip()
+            dt = r.get("DATE")
+            shift = str(r.get("SHIFT")).strip()
+            mc = int(r.get("M/C#")) if r.get("M/C#") not in (None, "", "nan") else None
+            dn = str(r.get("DN/CLASS")).strip()
+            length = float(r.get("LENGTH")) if r.get("LENGTH") not in (None, "", "nan") else None
+
+            # Check if record exists (match identity key)
+            existing = existing_map.get(key, None)
+
+            if existing:
+                # ==== UPDATE EXISTING ROW ====
+
+                # Keep old row_hash + file_version
+                old_hash = existing.row_hash
+
+                # Update all fields EXCEPT row_hash + file_version
+                existing.cast_nos = r.get("CAST NOs")
+                existing.casting_rej_nos = r.get("Casting Rej NOs")
+                existing.casting_rej_percent = r.get("Casting Rej%")
+                existing.conv_nos = r.get("CONV NOs")
+                existing.hptm_testing = r.get("HPTM Testing")
+                existing.hptm_rej_nos = r.get("HPTM Rej NOs")
+                existing.hptm_rej_percent = r.get("HPTM Rej%")
+                existing.annealing_rej_nos = r.get("Annealing Rej NOs")
+                existing.online_rej_nos = r.get("Online Rej NOs")
+                existing.final_rej_nos = r.get("Final Rej NOs")
+                existing.rework_rej_nos = r.get("Rework Rej NOs")
+                existing.yard_rej_nos = r.get("Yard Rej NOs")
+                existing.sr_rej_nos = r.get("S/R Rej NOs")
+                existing.other_rej_nos = r.get("Other Rej NOs")
+                existing.other_rej_percent = r.get("Other Rej%")
+                existing.total_rej_nos = r.get("Total Rej NOs")
+                existing.total_rej_percent = r.get("Total Rej%")
+                existing.sl_cut_loss_mt = r.get("S/L Cut Loss MT")
+                existing.source_sheet = r.get("source_sheet")
+                existing.original_filename = fname
+
+                # DO NOT modify existing.file_version
+                # DO NOT modify existing.row_hash
+
+                updated += 1
+                continue
+
+            # ==== INSERT NEW ROW ====
+
+            # Generate new hash ONLY for new rows
+            raw_hash = f"{plant}|{dt}|{shift}|{mc}|{dn}|{length}"
+            row_hash = hashlib.md5(raw_hash.encode()).hexdigest()
+
+            new_row = ProdRejData(
+                user_email=user_email,
+                plant=plant,
+                date_field=dt,
+                shift=shift,
+                mc_number=mc,
+                dn_class=dn,
+                length=length,
+
+                cast_nos=r.get("CAST NOs"),
+                casting_rej_nos=r.get("Casting Rej NOs"),
+                casting_rej_percent=r.get("Casting Rej%"),
+                conv_nos=r.get("CONV NOs"),
+                hptm_testing=r.get("HPTM Testing"),
+                hptm_rej_nos=r.get("HPTM Rej NOs"),
+                hptm_rej_percent=r.get("HPTM Rej%"),
+                annealing_rej_nos=r.get("Annealing Rej NOs"),
+                online_rej_nos=r.get("Online Rej NOs"),
+                final_rej_nos=r.get("Final Rej NOs"),
+                rework_rej_nos=r.get("Rework Rej NOs"),
+                yard_rej_nos=r.get("Yard Rej NOs"),
+                sr_rej_nos=r.get("S/R Rej NOs"),
+                other_rej_nos=r.get("Other Rej NOs"),
+                other_rej_percent=r.get("Other Rej%"),
+                total_rej_nos=r.get("Total Rej NOs"),
+                total_rej_percent=r.get("Total Rej%"),
+                sl_cut_loss_mt=r.get("S/L Cut Loss MT"),
+
+                source_sheet=r.get("source_sheet"),
+                original_filename=fname,
+                file_version=version,
+                row_hash=row_hash
+            )
+
+            session.add(new_row)
+            inserted += 1
+
+        session.commit()
+        return {"inserted": inserted, "updated": updated}
 
     finally:
         session.close()
@@ -946,6 +976,7 @@ def get_rejection_data(user_email, limit=None):
     df = pd.read_sql(text(base_query), engine, params=params)
     return df
 
+ALL_HASH_COLUMNS = list(set(REQUIRED_COLUMNS + PROD_REJ_REQUIRED_COLUMNS))
 
 def get_file_versions_data(user_email):
     q = """
@@ -1138,6 +1169,7 @@ def process_excel_file(uploaded_file, user_email):
 
             # Fill missing optional columns
             df = ensure_columns(df, OPTIONAL_COLS, fill="")
+            
 
             # Keep only needed DIP fields
             keep_cols = [c for c in REQUIRED_COLUMNS if c in df.columns]
@@ -1168,7 +1200,9 @@ def process_excel_file(uploaded_file, user_email):
         # STEP 4: Compute hash only on DIP data (NOT Prod-Rej)
         # ------------------------------------------------------------
         dip_for_hash = dip_df.copy() if not dip_df.empty else pd.DataFrame(columns=REQUIRED_COLUMNS)
-        file_hash = calculate_file_hash(dip_for_hash)
+        combined_df = pd.concat([dip_for_hash, pr_df], axis=0, ignore_index=True)
+        file_hash = calculate_file_hash(combined_df)
+
 
         # ------------------------------------------------------------
         # STEP 5: Check duplicate BEFORE saving file
@@ -1187,7 +1221,8 @@ def process_excel_file(uploaded_file, user_email):
             }).fetchone()
 
         if existed:
-            st.warning("⚠️ This file (by DIP content) seems to be a duplicate.")
+            st.warning("⚠️ This file seems to be a duplicate (same DIP + Prod-Rej data).")
+
             with st.form("dup_confirm"):
                 go = st.form_submit_button("Upload anyway")
                 cancel = st.form_submit_button("Cancel")
