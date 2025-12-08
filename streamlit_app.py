@@ -256,6 +256,75 @@ class FileVersion(Base):
     file_size = Column(Integer)
     record_count = Column(Integer)
 
+class RejectionDIP1(Base):
+    __tablename__ = "rejection_dip1"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_email = Column(String(255), nullable=False)
+    plant = Column(String(50))
+    date_field = Column(Date)
+    shift = Column(String(10))
+    shift_ic = Column(String(50))
+    dn_class = Column(String(50))
+    length = Column(String(50))
+    category = Column(String(255))
+    stage = Column(String(255))
+    y = Column(String(4))
+    m = Column(String(4))
+    dd = Column(String(4))
+    mc_number = Column(Integer)
+    pn = Column(String(50))
+    batch = Column(String(50))
+    casting_shift = Column(String(50))
+    mould_no = Column(String(50))
+    run_no = Column(String(50))
+    weight = Column(String(50))
+    visual_defect = Column(String(255))
+    defect_loc = Column(String(255))
+    defect_at_leak_point = Column(String(255))
+    lining = Column(String(255))
+    entry = Column(String(255))
+    source_sheet = Column(String(255))
+    original_filename = Column(String(255))
+    file_version = Column(Integer)
+    row_hash = Column(String(64), index=True)
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+
+
+class RejectionDIP2(Base):
+    __tablename__ = "rejection_dip2"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_email = Column(String(255), nullable=False)
+    plant = Column(String(50))
+    date_field = Column(Date)
+    shift = Column(String(10))
+    shift_ic = Column(String(50))
+    dn_class = Column(String(50))
+    length = Column(String(50))
+    category = Column(String(255))
+    stage = Column(String(255))
+    y = Column(String(4))
+    m = Column(String(4))
+    dd = Column(String(4))
+    mc_number = Column(Integer)
+    pn = Column(String(50))
+    batch = Column(String(50))
+    casting_shift = Column(String(50))
+    mould_no = Column(String(50))
+    run_no = Column(String(50))
+    weight = Column(String(50))
+    visual_defect = Column(String(255))
+    defect_loc = Column(String(255))
+    defect_at_leak_point = Column(String(255))
+    lining = Column(String(255))
+    entry = Column(String(255))
+    source_sheet = Column(String(255))
+    original_filename = Column(String(255))
+    file_version = Column(Integer)
+    row_hash = Column(String(64), index=True)
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+
 
 class RejectionData(Base):
     __tablename__ = "rejection_data"
@@ -960,21 +1029,30 @@ def store_prod_rej_rows(df, user_email, fname, version):
     finally:
         session.close()
 
-def get_rejection_data(user_email, limit=None):
-    # Use pandas + SQLAlchemy text for convenience
-    base_query = """
-        SELECT * FROM rejection_data
-        WHERE user_email = :user_email
-        ORDER BY uploaded_at DESC
+def get_rejection_data(user_email):
+    query = """
+        SELECT 
+            plant, date_field, shift, shift_ic, dn_class, length, 
+            category, stage, y, m, dd, mc_number, pn, batch, 
+            casting_shift, mould_no, run_no, weight, visual_defect, 
+            defect_loc, defect_at_leak_point, lining, entry,
+            source_sheet, original_filename, file_version, 
+            uploaded_at, row_hash
+        FROM rejection_dip1
+        WHERE user_email = :email
+        UNION ALL
+        SELECT 
+            plant, date_field, shift, shift_ic, dn_class, length, 
+            category, stage, y, m, dd, mc_number, pn, batch, 
+            casting_shift, mould_no, run_no, weight, visual_defect, 
+            defect_loc, defect_at_leak_point, lining, entry,
+            source_sheet, original_filename, file_version, 
+            uploaded_at, row_hash
+        FROM rejection_dip2
+        WHERE user_email = :email
+        ORDER BY uploaded_at DESC;
     """
-    if limit:
-        base_query += " LIMIT :limit_val"
-        params = {"user_email": user_email, "limit_val": int(limit)}
-    else:
-        params = {"user_email": user_email}
-
-    df = pd.read_sql(text(base_query), engine, params=params)
-    return df
+    return pd.read_sql(text(query), engine, params={"email": user_email})
 
 ALL_HASH_COLUMNS = list(set(REQUIRED_COLUMNS + PROD_REJ_REQUIRED_COLUMNS))
 
@@ -1123,7 +1201,12 @@ def process_excel_file(uploaded_file, user_email):
         # ------------------------------------------------------------
         xls = pd.ExcelFile(uploaded_file)
 
-        dip_frames = []          # DIP-1 & DIP-2
+        dip_frames = []   
+        # DIP-1 & DIP-2
+        dip1_frames = []
+        dip2_frames = []
+        prod_rej_frames = []
+
         prod_rej_frames = []     # Prod-Rej
 
         # ------------------------------------------------------------
@@ -1184,17 +1267,25 @@ def process_excel_file(uploaded_file, user_email):
             df = df[df["SHIFT"].astype(str).str.strip() != ""]
             df = df[df["DN/CLASS"].astype(str).str.strip() != ""]
 
-            dip_frames.append(df)
+            if sheet == "Rejection DIP-1":
+                df["source_sheet"] = "DIP-1"
+                dip1_frames.append(df)
+
+            elif sheet == "Rejection DIP-2":
+                df["source_sheet"] = "DIP-2"
+                dip2_frames.append(df)
+
 
         # ------------------------------------------------------------
         # STEP 3: Allow DIP-only, Prod-Rej-only, or mixed uploads
         # ------------------------------------------------------------
-        dip_df = pd.concat(dip_frames, ignore_index=True) if dip_frames else pd.DataFrame()
-        pr_df = pd.concat(prod_rej_frames, ignore_index=True) if prod_rej_frames else pd.DataFrame()
-
-        if dip_df.empty and pr_df.empty:
+        dip1_df = pd.concat(dip1_frames, ignore_index=True) if dip1_frames else pd.DataFrame()
+        dip2_df = pd.concat(dip2_frames, ignore_index=True) if dip2_frames else pd.DataFrame()
+        pr_df   = pd.concat(prod_rej_frames, ignore_index=True) if prod_rej_frames else pd.DataFrame()
+        if dip1_df.empty and dip2_df.empty and pr_df.empty:
             st.error("No valid sheets found in this file.")
             return False
+        dip_df = pd.concat([dip1_df, dip2_df], ignore_index=True) if (not dip1_df.empty or not dip2_df.empty) else pd.DataFrame()
 
         # ------------------------------------------------------------
         # STEP 4: Compute hash only on DIP data (NOT Prod-Rej)
@@ -1245,8 +1336,8 @@ def process_excel_file(uploaded_file, user_email):
         # ------------------------------------------------------------
         if not dip_df.empty:
 
-            # rename to DB schema
-            dip_df = dip_df.rename(columns={
+            # 1️⃣ Define DIP rename map
+            RENAME_MAP = {
                 'PLANT': 'plant',
                 'DATE': 'date_field',
                 'SHIFT': 'shift',
@@ -1270,21 +1361,32 @@ def process_excel_file(uploaded_file, user_email):
                 'DEFECT AT LEAK POINT': 'defect_at_leak_point',
                 'LINING': 'lining',
                 'ENTRY': 'entry'
-            })
+            }
 
+            # 2️⃣ Rename DIP-1 and DIP-2 BEFORE storing into DB
+            if not dip1_df.empty:
+                dip1_df = dip1_df.rename(columns=RENAME_MAP)
+
+            if not dip2_df.empty:
+                dip2_df = dip2_df.rename(columns=RENAME_MAP)
+
+            # 3️⃣ Rename unified DIP DF as well (used for MC tables)
+            dip_df = dip_df.rename(columns=RENAME_MAP)
             dip_df = dip_df.loc[:, ~dip_df.columns.duplicated()]
 
-            # MC# convert to int or None
+            # 4️⃣ Convert MC number
             dip_df["mc_number"] = dip_df["mc_number"].apply(
                 lambda x: int(float(x)) if str(x).replace(".", "", 1).isdigit() else None
             )
 
-            # Store DIP data
-            store_excel_data_to_db(
-                dip_df, user_email, uploaded_file.name, version_number
-            )
+            # 5️⃣ Store DIP-1 & DIP-2 separately
+            if not dip1_df.empty:
+                store_dip1_rows(dip1_df, user_email, uploaded_file.name, version_number)
 
-            # Generate per-MC tables (only for DIP)
+            if not dip2_df.empty:
+                store_dip2_rows(dip2_df, user_email, uploaded_file.name, version_number)
+
+            # 6️⃣ Create per-MC tables
             recreate_mc_tables_from_df(
                 df_filtered=dip_df,
                 original_filename=uploaded_file.name,
@@ -1470,6 +1572,92 @@ def view_data_tab():
     else:
         st.info("No database records found. Upload some Excel files to see data here!")
 
+def store_dip1_rows(df, user_email, fname, ver):
+    session = get_session()
+    try:
+        df["row_hash"] = df.apply(lambda r: compute_row_hash(r), axis=1)
+        existing = set(h[0] for h in session.query(RejectionDIP1.row_hash).filter(
+            RejectionDIP1.row_hash.in_(df["row_hash"].tolist())
+        ).all())
+
+        new = []
+        for _, r in df.iterrows():
+            if r["row_hash"] in existing:
+                continue
+
+            new.append(RejectionDIP1(
+                user_email=user_email,
+                **df_row_to_model_kwargs(r),
+                original_filename=fname,
+                file_version=ver,
+                row_hash=r["row_hash"]
+            ))
+
+        if new:
+            session.add_all(new)
+            session.commit()
+        return len(new)
+
+    finally:
+        session.close()
+
+
+def store_dip2_rows(df, user_email, fname, ver):
+    session = get_session()
+    try:
+        df["row_hash"] = df.apply(lambda r: compute_row_hash(r), axis=1)
+        existing = set(h[0] for h in session.query(RejectionDIP2.row_hash).filter(
+            RejectionDIP2.row_hash.in_(df["row_hash"].tolist())
+        ).all())
+
+        new = []
+        for _, r in df.iterrows():
+            if r["row_hash"] in existing:
+                continue
+
+            new.append(RejectionDIP2(
+                user_email=user_email,
+                **df_row_to_model_kwargs(r),
+                original_filename=fname,
+                file_version=ver,
+                row_hash=r["row_hash"]
+            ))
+
+        if new:
+            session.add_all(new)
+            session.commit()
+        return len(new)
+
+    finally:
+        session.close()
+
+def df_row_to_model_kwargs(r):
+    return dict(
+        plant=r.get("plant"),
+        date_field=r.get("date_field"),
+        shift=r.get("shift"),
+        shift_ic=r.get("shift_ic"),
+        dn_class=r.get("dn_class"),
+        length=r.get("length"),
+        category=r.get("category"),
+        stage=r.get("stage"),
+        y=r.get("y"),
+        m=r.get("m"),
+        dd=r.get("dd"),
+        mc_number=r.get("mc_number"),
+        pn=r.get("pn"),
+        batch=r.get("batch"),
+        casting_shift=r.get("casting_shift"),
+        mould_no=r.get("mould_no"),
+        run_no=r.get("run_no"),
+        weight=r.get("weight"),
+        visual_defect=r.get("visual_defect"),
+        defect_loc=r.get("defect_loc"),
+        defect_at_leak_point=r.get("defect_at_leak_point"),
+        lining=r.get("lining"),
+        entry=r.get("entry"),
+        source_sheet=r.get("source_sheet")
+    )
 
 def file_versions_tab():
     st.header("📁 File Versions")
