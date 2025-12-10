@@ -1,4 +1,4 @@
-treamlit==1.39.0
+streamlit==1.39.0
 pandas==2.3.3
 openpyxl==3.1.5
 python-dotenv==1.0.1
