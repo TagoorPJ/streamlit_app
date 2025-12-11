@@ -55,6 +55,17 @@ MC_REGISTRY_TABLE = "mc_table_registry"
 # Sheets processed
 ACCEPTED_SHEETS = ["Rejection DIP-1", "Rejection DIP-2", "Prod-Rej"]
 
+
+hide_menu_style = """
+    <style>
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    .stDeployButton {display: none;}
+    .stActionButton {display: none;}
+    </style>
+"""
+st.markdown(hide_menu_style, unsafe_allow_html=True)
 # Canonical DIP columns
 REQUIRED_COLUMNS = [
     "PLANT",
